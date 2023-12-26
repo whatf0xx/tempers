@@ -1,0 +1,5 @@
+/target
+/Cargo.lock
+MT19937
+*.txt
+.env
