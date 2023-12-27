@@ -42,7 +42,7 @@ impl MT19937 {
     }
 
     pub fn from_seed(seed: u32) -> MT19937 {
-        let f: Wrapping<u32> = Wrapping(1812433253);  // default value for seeing generator
+        let f: Wrapping<u32> = Wrapping(1812433253);  // default value for seeding generator
         let mut _self = MT19937::_init();
         _self._state[0] = seed;
 
@@ -52,7 +52,7 @@ impl MT19937 {
             *x = temp_overflow.0;  // this is how we access the wrapped unit, apparently
             prev = Wrapping(*x);
         }
-        _self._i = 624;
+        _self.twist();
         _self
     }
 
@@ -78,22 +78,22 @@ impl MT19937 {
         self._i = 0;
     }
 
-    fn temper(&mut self) {
+    fn temper(&mut self) -> u32 {
         let mut x = self._state[self._i];
         x = x ^ ((x >> self.u) & self.d);
         x = x ^ ((x << self.s) & self.b);
         x = x ^ ((x << self.t) & self.c);
         x = x ^ (x >> self.l);
-        self._state[self._i] = x;
+        // self._state[self._i] = x;
         self._i += 1;
+        x
     }
 
     pub fn next(&mut self) -> u32 {
         if self._i as u32 == self.n {
             self.twist();
         }
-        self.temper();
-        self._state[self._i - 1]
+        self.temper()
     }
 }
 
@@ -106,18 +106,18 @@ mod tests {
     };
     use std::iter::zip;
      
-    fn read_state_from_txt(filename: &str) -> Result<[u32;624]> {
+    fn read_u32_arr_from_txt(filename: &str, n: u32) -> Result<Vec<u32>> {
         let file = File::open(filename)?;
         let reader = BufReader::new(file);
     
-        let mut numbers: [u32;624] = [0;624];
+        let mut numbers: Vec<u32> = Vec::new();
     
-        for (entry, line) in zip(numbers.iter_mut(), reader.lines()) {
+        for line in reader.lines() {
             let line = line?;
             if let Ok(number) = line.trim().parse::<u32>() {
-                *entry = number;
+                numbers.push(number)
             } else {
-                eprintln!("Warning: Ignoring non-integer line: {}", line);
+                panic!("Got an uninterpretable line: {}", line);
             }
         }
     
@@ -125,12 +125,32 @@ mod tests {
     }
 
     #[test]
+    fn test_initial_state() {
+        let twister = MT19937::from_seed(5489);
+        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_init_state.txt", 624).unwrap();
+        for (my_state, ouyang_state) in zip(twister._state.iter(), ouyang_file.iter()) {
+            assert_eq!(my_state, ouyang_state);
+        }
+    }
+
+    #[test]
+    fn test_state_temper() {
+        let mut twister = MT19937::from_seed(5489);
+        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_state_check.txt", 624).unwrap();
+        twister.next();  // increment the state by one, are they still equal?
+        for (my_state, ouyang_state) in zip(twister._state.iter(), ouyang_file.iter()) {
+            assert_eq!(my_state, ouyang_state);
+        }
+    }
+    
+    #[test]
     fn test_values() {
         let mut twister = MT19937::from_seed(5489);
-        let ouyang_file = read_state_from_txt("ouyang_mt_100 outputs.txt").unwrap();
-        for ouyang_num in ouyang_file.iter() {
+        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_100_outputs.txt", 1000).unwrap();
+        for (i, ouyang_num) in enumerate(ouyang_file.iter()) {
             let my_num = twister.next();
-            assert_eq!(my_num, *ouyang_num);
+            assert_eq!(my_num, *ouyang_num,
+                "\n(failed on the {}th number)", i);
         }
     }
 
