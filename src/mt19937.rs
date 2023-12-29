@@ -1,8 +1,12 @@
 use itertools::enumerate;
 use core::u32;
-use std::num::Wrapping;
+use std::{
+    num::Wrapping,
+    iter::zip
+};
 
 #[allow(dead_code)]
+#[derive(PartialEq, Debug)]
 pub struct MT19937 {
     w: u32,  // 32 for 32-bit integers, don't change this because all the params depend on it
     n: u32,
@@ -54,6 +58,23 @@ impl MT19937 {
         }
         _self.twist();
         _self
+    }
+
+    fn _from_complete_output(output: Vec<u32>) -> Result<MT19937, TempersError> {
+        let mut _self = MT19937::_init();
+        let _len = output.len();
+        if _len != _self.n as usize { 
+            return Err(TempersError::InputLengthError(_len));
+        }
+
+        let untempered_output: Vec<u32> = output.iter()
+            .map(|&u| _self.untemper(u))
+            .collect();
+
+        for (twister_state, &value) in zip(_self._state.iter_mut(), untempered_output.iter()) {
+            *twister_state = value;
+        }
+        return Ok(_self)
     }
 
     pub fn default() -> MT19937 {
@@ -164,6 +185,10 @@ impl MT19937 {
     }
 }
 
+#[derive(PartialEq, Debug)]
+enum TempersError {
+    InputLengthError(usize)
+}
 
 
 #[cfg(test)]
@@ -173,7 +198,6 @@ mod tests {
         fs::File,
         io::{BufRead, BufReader, Result},
     };
-    use std::iter::zip;
      
     fn read_u32_arr_from_txt(filename: &str, n: u32) -> Result<Vec<u32>> {
         let file = File::open(filename)?;
@@ -280,6 +304,17 @@ mod tests {
         assert_eq!(987654321, twister._composite_untemper(twister._composite_temper(987654321)));
         assert_eq!(u32::MAX, twister._composite_untemper(twister._composite_temper(u32::MAX)));
         assert_eq!(0, twister._composite_untemper(twister._composite_temper(0)));
+    }
+    
+    #[test]
+    fn test_from_complete_state() {
+        let mut twister = MT19937::default();
+        let twister_clone = MT19937::default();
+
+        let first_twist_output: Vec<u32> = (0..624).map(|_| twister.next()).collect();
+        
+        let twister_from_output = MT19937::_from_complete_output(first_twist_output);
+        assert_eq!(twister_from_output, Ok(twister_clone));
     }
     
     // #[test]
