@@ -173,7 +173,7 @@ impl MT19937 {
         self._temper_transform(self._state[self._i-1])
     }
 
-    pub fn next(&mut self) -> u32 {
+    fn _next(&mut self) -> u32 {
         if self._i as u32 == self.n {
             self.twist();
         }
@@ -182,6 +182,14 @@ impl MT19937 {
 
     fn untemper(&self, mt_output: u32) -> u32 {
         self._composite_untemper(mt_output)
+    }
+}
+
+
+impl Iterator for MT19937 {
+    type Item = u32;
+    fn next(&mut self) -> Option<u32> {
+        Some(self._next())
     }
 }
 
@@ -230,7 +238,7 @@ mod tests {
     fn test_state_temper() {  // actually this test is mostly useless, the state only mutates on twist()
         let mut twister = MT19937::from_seed(5489);
         let ouyang_file = read_u32_arr_from_txt("ouyang_mt_state_check.txt", 624).unwrap();
-        twister.next();  // increment the state by one, are they still equal?
+        twister._next();  // increment the state by one, are they still equal?
         for (my_state, ouyang_state) in zip(twister._state.iter(), ouyang_file.iter()) {
             assert_eq!(my_state, ouyang_state);
         }
@@ -241,10 +249,20 @@ mod tests {
         let mut twister = MT19937::from_seed(5489);
         let ouyang_file = read_u32_arr_from_txt("ouyang_mt_100_outputs.txt", 1000).unwrap();
         for (i, ouyang_num) in enumerate(ouyang_file.iter()) {
-            let my_num = twister.next();
+            let my_num = twister._next();
             assert_eq!(my_num, *ouyang_num,
                 "\n(failed on the {}th number)", i);
         }
+    }
+
+    #[test]
+    fn mt_as_iter() {
+        let mut twister = MT19937::default();
+        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_100_outputs.txt", 1000).unwrap();
+        for (mt_iterated, ouyang_num) in zip(twister, ouyang_file.iter()) {
+            assert_eq!(mt_iterated, *ouyang_num);
+        }
+        
     }
 
     #[test]
@@ -252,7 +270,7 @@ mod tests {
         let mut twister = MT19937::from_seed(123456789);
         let internal_state = twister._state.clone();
         for (i, e) in enumerate(internal_state) {
-            let curr = twister.next();
+            let curr = twister._next();
             assert_eq!(e, twister.untemper(curr), "\nfailed on the {}th value;\ntwister state dump:\n{:?}",
             i, internal_state);
         }
@@ -311,12 +329,12 @@ mod tests {
         let mut twister = MT19937::default();
         let twister_clone = MT19937::default();
 
-        let first_twist_output: Vec<u32> = (0..624).map(|_| twister.next()).collect();
+        let first_twist_output: Vec<u32> = (0..624).map(|_| twister._next()).collect();
         
         let twister_from_output = MT19937::_from_complete_output(first_twist_output);
         assert_eq!(twister_from_output, Ok(twister_clone));
     }
-    
+
     // #[test]
     // fn dump_subtemper1() {
     //     let twister = MT19937::default();
