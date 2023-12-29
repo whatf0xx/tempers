@@ -78,15 +78,78 @@ impl MT19937 {
         self._i = 0;
     }
 
-    fn temper(&mut self) -> u32 {
-        let mut x = self._state[self._i];
-        x = x ^ ((x >> self.u) & self.d);
-        x = x ^ ((x << self.s) & self.b);
-        x = x ^ ((x << self.t) & self.c);
-        x = x ^ (x >> self.l);
-        // self._state[self._i] = x;
-        self._i += 1;
+    #[inline]
+    fn _subtemper1(&self, x: u32) -> u32 {
+        x ^ ((x >> self.u) & self.d)
+    }
+
+    #[inline]
+    fn _inv_subtemper1(&self, x: u32) -> u32 {
+        let mut x = x;
+        for _ in 0..3 { x = x ^ ((x >> self.u) & self.d); }  // can we be smarter with this?
         x
+    }
+
+    #[inline]
+    fn _subtemper2(&self, x: u32) -> u32 {
+        x ^ ((x << self.s) & self.b)
+    }
+
+    #[inline]
+    fn _inv_subtemper2(&self, x: u32) -> u32 {
+        let mut x = x;
+        for _ in 0..7 { x = x ^ ((x << self.s) & self.b); }  // can we be smarter with this?
+        x
+    }
+
+    #[inline]
+    fn _subtemper3(&self, x: u32) -> u32 {
+        x ^ ((x << self.t) & self.c)
+    }
+
+    #[inline]
+    fn _inv_subtemper3(&self, x: u32) -> u32 {
+        x ^ ((x << self.t) & self.c)
+    }
+
+    #[inline]
+    fn _subtemper4(&self, x: u32) -> u32 {
+        x ^ (x >> self.l)
+    }
+
+    #[inline]
+    fn _inv_subtemper4(&self, x: u32) -> u32 {
+        x ^ (x >> self.l)
+    }
+
+    fn _composite_temper(&self, p: u32) -> u32 {
+        let mut x = p;
+        x = self._subtemper1(x);
+        x = self._subtemper2(x);
+        x = self._subtemper3(x);
+        self._subtemper4(x)
+    }
+
+    fn _composite_untemper(&self, p: u32) -> u32 {
+        let mut x = p;
+        x = self._inv_subtemper4(x);
+        x = self._inv_subtemper3(x);
+        x = self._inv_subtemper2(x);
+        self._inv_subtemper1(x)
+    }
+
+    fn _temper_transform(&self, p: u32) -> u32 {
+        let mut x = p;
+        x = x ^ ((x >> self.u) & self.d);  // u = 11 (!)
+        x = x ^ ((x << self.s) & self.b);  // s = 7 (!!)
+        x = x ^ ((x << self.t) & self.c);  // t = 15 (!)
+        x = x ^ (x >> self.l);  // l = 18
+        x
+    }
+    
+    fn temper(&mut self) -> u32 {
+        self._i += 1;
+        self._temper_transform(self._state[self._i-1])
     }
 
     pub fn next(&mut self) -> u32 {
@@ -95,7 +158,18 @@ impl MT19937 {
         }
         self.temper()
     }
+
+    fn untemper(&self, mt_output: u32) -> u32 {
+        let mut x = mt_output;
+        x = x ^ (x >> self.l);  // perform once for 18 * 2 > 32
+        for _ in 0..2 { x = x ^ ((x << self.t) & self.c); } // repeat twice for 15 * 3 > 32
+        for _ in 0..4 { x = x ^ ((x << self.s) & self.b); } // repeat 4 times for 7 * 5 > 32
+        for _ in 0..2 { x = x ^ ((x >> self.u) & self.d); } // repeat twice for 11 * 3 > 32
+        x
+    }
 }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -112,7 +186,7 @@ mod tests {
     
         let mut numbers: Vec<u32> = Vec::new();
     
-        for line in reader.lines() {
+        for (_, line) in zip(0..n, reader.lines()) {
             let line = line?;
             if let Ok(number) = line.trim().parse::<u32>() {
                 numbers.push(number)
@@ -134,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn test_state_temper() {
+    fn test_state_temper() {  // actually this test is mostly useless, the state only mutates on twist()
         let mut twister = MT19937::from_seed(5489);
         let ouyang_file = read_u32_arr_from_txt("ouyang_mt_state_check.txt", 624).unwrap();
         twister.next();  // increment the state by one, are they still equal?
@@ -154,9 +228,74 @@ mod tests {
         }
     }
 
+    #[test]
+    fn untemper_basic_state() {
+        let mut twister = MT19937::from_seed(123456789);
+        let internal_state = twister._state.clone();
+        for (i, e) in enumerate(internal_state) {
+            let curr = twister.next();
+            assert_eq!(e, curr, "\nfailed on the {}th value", i);
+        }
+    }
+
+    #[test]
+    fn temper_composite() {
+        let twister = MT19937::from_seed(123456789);
+        assert_eq!(twister._temper_transform(123456789), twister._composite_temper(123456789));
+    }
+
+    #[test]
+    fn inv_subtemper4_check() {
+        let twister = MT19937::default();
+        assert_eq!(123456789, twister._inv_subtemper4(twister._subtemper4(123456789)));
+    }
+
+    #[test]
+    fn inv_subtemper3_check() {
+        let twister = MT19937::default();
+        assert_eq!(123456789, twister._inv_subtemper3(twister._subtemper3(123456789)));
+        assert_eq!(987654321, twister._inv_subtemper3(twister._subtemper3(987654321)));
+        assert_eq!(u32::MAX, twister._inv_subtemper3(twister._subtemper3(u32::MAX)));
+        assert_eq!(0, twister._inv_subtemper3(twister._subtemper3(0)));
+    }
+
+    #[test]
+    fn inv_subtemper2_check() {
+        let twister = MT19937::default();
+        assert_eq!(123456789, twister._inv_subtemper2(twister._subtemper2(123456789)));
+        assert_eq!(987654321, twister._inv_subtemper2(twister._subtemper2(987654321)));
+        assert_eq!(u32::MAX, twister._inv_subtemper2(twister._subtemper2(u32::MAX)));
+        assert_eq!(0, twister._inv_subtemper2(twister._subtemper2(0)));
+    }
+
+    #[test]
+    fn inv_subtemper1_check() {
+        let twister = MT19937::default();
+        assert_eq!(123456789, twister._inv_subtemper1(twister._subtemper1(123456789)));
+        assert_eq!(987654321, twister._inv_subtemper1(twister._subtemper1(987654321)));
+        assert_eq!(u32::MAX, twister._inv_subtemper1(twister._subtemper1(u32::MAX)));
+        assert_eq!(0, twister._inv_subtemper1(twister._subtemper1(0)));
+    }
+
+    #[test]
+    fn composite_untemper_check() {
+        let twister = MT19937::default();
+        assert_eq!(123456789, twister._composite_untemper(twister._composite_temper(123456789)));
+        assert_eq!(987654321, twister._composite_untemper(twister._composite_temper(987654321)));
+        assert_eq!(u32::MAX, twister._composite_untemper(twister._composite_temper(u32::MAX)));
+        assert_eq!(0, twister._composite_untemper(twister._composite_temper(0)));
+    }
+    
     // #[test]
-    // fn generate() {
-    //     let mut twister = MT19937::default();
-    //     assert_eq!(twister.next(), 3382763572);
+    // fn dump_subtemper1() {
+    //     let twister = MT19937::default();
+    //     let mut u: u32 = 123456789;
+    //     let mut trail: Vec<u32> = Vec::new();
+    //     trail.push(u.clone());
+    //     for _ in 0..20 {
+    //         trail.push(twister._subtemper1(u.clone()));
+    //         u = twister._subtemper1(u);
+    //     }
+    //     panic!("Trail: {:?}", trail);
     // }
 }
