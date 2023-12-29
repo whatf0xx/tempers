@@ -160,12 +160,7 @@ impl MT19937 {
     }
 
     fn untemper(&self, mt_output: u32) -> u32 {
-        let mut x = mt_output;
-        x = x ^ (x >> self.l);  // perform once for 18 * 2 > 32
-        for _ in 0..2 { x = x ^ ((x << self.t) & self.c); } // repeat twice for 15 * 3 > 32
-        for _ in 0..4 { x = x ^ ((x << self.s) & self.b); } // repeat 4 times for 7 * 5 > 32
-        for _ in 0..2 { x = x ^ ((x >> self.u) & self.d); } // repeat twice for 11 * 3 > 32
-        x
+        self._composite_untemper(mt_output)
     }
 }
 
@@ -234,7 +229,8 @@ mod tests {
         let internal_state = twister._state.clone();
         for (i, e) in enumerate(internal_state) {
             let curr = twister.next();
-            assert_eq!(e, curr, "\nfailed on the {}th value", i);
+            assert_eq!(e, twister.untemper(curr), "\nfailed on the {}th value;\ntwister state dump:\n{:?}",
+            i, internal_state);
         }
     }
 
