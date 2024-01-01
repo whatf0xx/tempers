@@ -60,7 +60,7 @@ impl MT19937 {
         _self
     }
 
-    fn _from_complete_output(output: Vec<u32>) -> Result<MT19937, TempersError> {
+    fn _from_complete_output(output: &[u32]) -> Result<MT19937, TempersError> {
         let mut _self = MT19937::_init();
         let _len = output.len();
         if _len != _self.n as usize { 
@@ -77,6 +77,38 @@ impl MT19937 {
         return Ok(_self)
     }
 
+    pub fn from_iter<T>(stream: &mut T) -> Result<MT19937, TempersError>
+    where T: Iterator<Item = u32> {  
+        let mut stream_vals: Vec<u32> = Vec::new();
+        for _ in 0..624 {
+            if let Some(u) = stream.next() {
+                stream_vals.push(u);
+            } else {
+                return Err(TempersError::IncompleteIterator);
+            }
+        }
+
+        for i in 0..624 {
+            let mut attempted_construction = MT19937::_from_complete_output(&stream_vals[i+0..i+624])?;
+            attempted_construction.twist();
+
+            let external_next = stream.next().ok_or(TempersError::IncompleteIterator);
+            let internal_next = attempted_construction.next().ok_or(TempersError::UnknownError);  // different error because my implementation has failed, clearly
+
+            if internal_next == external_next {
+                return Ok(attempted_construction);
+            }
+
+            if let Some(u) = stream.next() {
+                stream_vals.push(u);
+            } else {
+                return Err(TempersError::IncompleteIterator);
+            }
+        }
+        
+        Err(TempersError::UnmatcheableIterator)
+    }
+    
     pub fn default() -> MT19937 {
         // Generates an MT19937 using the reference values, unseeded
         let seed: u32 = 5489;  // reference C value
@@ -194,8 +226,11 @@ impl Iterator for MT19937 {
 }
 
 #[derive(PartialEq, Debug)]
-enum TempersError {
-    InputLengthError(usize)
+pub enum TempersError {
+    InputLengthError(usize),
+    IncompleteIterator,
+    UnmatcheableIterator,
+    UnknownError
 }
 
 
@@ -257,8 +292,8 @@ mod tests {
 
     #[test]
     fn mt_as_iter() {
-        let mut twister = MT19937::default();
-        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_100_outputs.txt", 1000).unwrap();
+        let twister = MT19937::default();  // we don't twist, no need for mutability
+        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_100_outputs.txt", 100).unwrap();
         for (mt_iterated, ouyang_num) in zip(twister, ouyang_file.iter()) {
             assert_eq!(mt_iterated, *ouyang_num);
         }
@@ -331,8 +366,22 @@ mod tests {
 
         let first_twist_output: Vec<u32> = (0..624).map(|_| twister._next()).collect();
         
-        let twister_from_output = MT19937::_from_complete_output(first_twist_output);
+        let twister_from_output = MT19937::_from_complete_output(&first_twist_output);
         assert_eq!(twister_from_output, Ok(twister_clone));
+    }
+
+    #[test]
+    fn test_from_unknown_state() {
+        let mut target_twister = MT19937::from_seed(987654321);
+        for _ in 0..1000 {
+            target_twister.next();  // get us to a random point between twists
+        }
+        
+        let mut matched_twister = MT19937::from_iter(&mut target_twister).unwrap();
+
+        for _ in 0..1000 {
+            assert_eq!(target_twister.next(), matched_twister.next());
+        }
     }
 
     // #[test]
