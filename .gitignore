@@ -1,5 +1,6 @@
 /target
 /Cargo.lock
 MT19937
-*.txt
+/mersenne-twister
 .env
+.vscode

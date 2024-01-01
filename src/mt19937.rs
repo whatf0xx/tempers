@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn test_initial_state() {
         let twister = MT19937::from_seed(5489);
-        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_init_state.txt", 624).unwrap();
+        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_init_state.txt", 624).unwrap();
         for (my_state, ouyang_state) in zip(twister._state.iter(), ouyang_file.iter()) {
             assert_eq!(my_state, ouyang_state);
         }
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn test_state_temper() {  // actually this test is mostly useless, the state only mutates on twist()
         let mut twister = MT19937::from_seed(5489);
-        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_state_check.txt", 624).unwrap();
+        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_state_check.txt", 624).unwrap();
         twister._next();  // increment the state by one, are they still equal?
         for (my_state, ouyang_state) in zip(twister._state.iter(), ouyang_file.iter()) {
             assert_eq!(my_state, ouyang_state);
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_values() {
         let mut twister = MT19937::from_seed(5489);
-        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_100_outputs.txt", 1000).unwrap();
+        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_100_outputs.txt", 1000).unwrap();
         for (i, ouyang_num) in enumerate(ouyang_file.iter()) {
             let my_num = twister._next();
             assert_eq!(my_num, *ouyang_num,
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn mt_as_iter() {
         let twister = MT19937::default();  // we don't twist, no need for mutability
-        let ouyang_file = read_u32_arr_from_txt("ouyang_mt_100_outputs.txt", 100).unwrap();
+        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_100_outputs.txt", 100).unwrap();
         for (mt_iterated, ouyang_num) in zip(twister, ouyang_file.iter()) {
             assert_eq!(mt_iterated, *ouyang_num);
         }
