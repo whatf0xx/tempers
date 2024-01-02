@@ -15,3 +15,6 @@ There are 3 main ways to initialise an `MT19937`:
 
 ## Proof of Concept
 See `test_from_unknown_state`.
+
+## References
+Thanks to Anne Ouyang (https://github.com/anneouyang/MT19937) and to Christian Stigen Larsen (https://github.com/cslarsen/mersenne-twister) for their implementations which helped me develop mine.
