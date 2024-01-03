@@ -2,7 +2,8 @@ use itertools::enumerate;
 use core::u32;
 use std::{
     num::Wrapping,
-    iter::zip
+    iter::zip,
+    collections::VecDeque
 };
 
 #[allow(dead_code)]
@@ -74,39 +75,51 @@ impl MT19937 {
         for (twister_state, &value) in zip(_self._state.iter_mut(), untempered_output.iter()) {
             *twister_state = value;
         }
+        
+        // N.B. that this reassembles the state, but as there is no twist involved this is ready
+        // to repeat the values already seen, not to produce a matching stream of new values
         return Ok(_self)
     }
 
     pub fn from_iter<T>(stream: &mut T) -> Result<MT19937, TempersError>
     where T: Iterator<Item = u32> {  
-        let mut stream_vals: Vec<u32> = Vec::new();
+        let mut stream_vals: VecDeque<u32> = VecDeque::new();
         for _ in 0..624 {
-            if let Some(u) = stream.next() {
-                stream_vals.push(u);
-            } else {
-                return Err(TempersError::IncompleteIterator);
-            }
+            stream_vals.push_back(stream.next().ok_or(TempersError::IncompleteIterator)?);
         }
 
-        for i in 0..624 {
-            let mut attempted_construction = MT19937::_from_complete_output(&stream_vals[i+0..i+624])?;
+        for _ in 0..624 {
+            // get the Deque as a slice to pass into the function
+            stream_vals.make_contiguous();
+            let trial_vals = stream_vals.as_slices().0;
+
+            let mut attempted_construction = MT19937::_from_complete_output(&trial_vals)?;
             attempted_construction.twist();
 
-            let external_next = stream.next().ok_or(TempersError::IncompleteIterator);
-            let internal_next = attempted_construction.next().ok_or(TempersError::UnknownError);  // different error because my implementation has failed, clearly
-
-            if internal_next == external_next {
+            if attempted_construction.test_next_equal_to_iter(stream)? {
                 return Ok(attempted_construction);
             }
 
-            if let Some(u) = stream.next() {
-                stream_vals.push(u);
-            } else {
-                return Err(TempersError::IncompleteIterator);
-            }
+            // Update the Deque with the next value from the stream and try again
+            stream_vals.push_back(stream.next().ok_or(TempersError::IncompleteIterator)?);
+            stream_vals.pop_front();
         }
         
+        // If you don't find the value after a complete twist cycle, it doesn't match
         Err(TempersError::UnmatcheableIterator)
+    }
+    
+    fn test_next_equal_to_iter<T>(self: &mut MT19937, a: &mut T) -> Result<bool, TempersError>
+    where 
+        T: Iterator<Item = u32>
+    {
+        let a_next = a.next().ok_or(TempersError::IncompleteIterator)?;
+        let mt_next = self.next().ok_or(TempersError::UnknownError)?;  // different error because my implementation has failed, clearly
+        if a_next == mt_next {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
     
     pub fn default() -> MT19937 {
@@ -366,8 +379,9 @@ mod tests {
 
         let first_twist_output: Vec<u32> = (0..624).map(|_| twister._next()).collect();
         
-        let twister_from_output = MT19937::_from_complete_output(&first_twist_output);
-        assert_eq!(twister_from_output, Ok(twister_clone));
+        let twister_from_output = MT19937::_from_complete_output(&first_twist_output).unwrap();
+        assert_eq!(twister_from_output, twister_clone);
+        assert_eq!(twister_from_output._i, twister_clone._i);
     }
 
     #[test]
