@@ -1,10 +1,6 @@
 use itertools::enumerate;
 use core::u32;
-use std::{
-    num::Wrapping,
-    iter::zip,
-    collections::VecDeque
-};
+use std::num::Wrapping;
 
 #[allow(dead_code)]
 #[derive(PartialEq, Debug)]
@@ -27,7 +23,11 @@ pub struct MT19937 {
 
 #[allow(dead_code)]
 impl MT19937 {
-    fn _init() -> MT19937 {
+    /// Create an MT19937 with its parameters set to the reference values and its internal state uninitialised.
+    /// 
+    /// This should hence not be used for generating random numbers, but can serve as a precursor to a useful generator
+    /// when its internal state is populated via a seed or by copying the state of another generator.
+    pub fn blank() -> MT19937 {
         MT19937{
             w: 32,
             n: 624,
@@ -48,7 +48,7 @@ impl MT19937 {
 
     pub fn from_seed(seed: u32) -> MT19937 {
         let f: Wrapping<u32> = Wrapping(1812433253);  // default value for seeding generator
-        let mut _self = MT19937::_init();
+        let mut _self = MT19937::blank();
         _self._state[0] = seed;
 
         let mut prev = Wrapping(seed);
@@ -60,67 +60,6 @@ impl MT19937 {
         _self.twist();
         _self
     }
-
-    fn _from_complete_output(output: &[u32]) -> Result<MT19937, TempersError> {
-        let mut _self = MT19937::_init();
-        let _len = output.len();
-        if _len != _self.n as usize { 
-            return Err(TempersError::InputLengthError(_len));
-        }
-
-        let untempered_output: Vec<u32> = output.iter()
-            .map(|&u| _self.untemper(u))
-            .collect();
-
-        for (twister_state, &value) in zip(_self._state.iter_mut(), untempered_output.iter()) {
-            *twister_state = value;
-        }
-        
-        // N.B. that this reassembles the state, but as there is no twist involved this is ready
-        // to repeat the values already seen, not to produce a matching stream of new values
-        return Ok(_self)
-    }
-
-    pub fn from_iter<T>(stream: &mut T) -> Result<MT19937, TempersError>
-    where T: Iterator<Item = u32> {  
-        let mut stream_vals: VecDeque<u32> = VecDeque::new();
-        for _ in 0..624 {
-            stream_vals.push_back(stream.next().ok_or(TempersError::IncompleteIterator)?);
-        }
-
-        for _ in 0..624 {
-            // get the Deque as a slice to pass into the function
-            stream_vals.make_contiguous();
-            let trial_vals = stream_vals.as_slices().0;
-
-            let mut attempted_construction = MT19937::_from_complete_output(&trial_vals)?;
-            attempted_construction.twist();
-
-            if attempted_construction.test_next_equal_to_iter(stream)? {
-                return Ok(attempted_construction);
-            }
-
-            // Update the Deque with the next value from the stream and try again
-            stream_vals.push_back(stream.next().ok_or(TempersError::IncompleteIterator)?);
-            stream_vals.pop_front();
-        }
-        
-        // If you don't find the value after a complete twist cycle, it doesn't match
-        Err(TempersError::UnmatcheableIterator)
-    }
-    
-    fn test_next_equal_to_iter<T>(self: &mut MT19937, a: &mut T) -> Result<bool, TempersError>
-    where 
-        T: Iterator<Item = u32>
-    {
-        let a_next = a.next().ok_or(TempersError::IncompleteIterator)?;
-        let mt_next = self.next().ok_or(TempersError::UnknownError)?;  // different error because my implementation has failed, clearly
-        if a_next == mt_next {
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
     
     pub fn default() -> MT19937 {
         // Generates an MT19937 using the reference values, unseeded
@@ -129,7 +68,7 @@ impl MT19937 {
     }
 
     #[allow(non_snake_case)]
-    fn twist(&mut self) {
+    pub fn twist(&mut self) {
         for i in 0..self.n as usize {  // redo this as an iterator using refcell?
             let mid_value = self._state[(i + self.m as usize) % self.n as usize];
             let base_upper = self._state[i] & (1 << 31);  // just take the top bit
@@ -144,16 +83,53 @@ impl MT19937 {
         self._i = 0;
     }
 
-    #[inline]
-    fn _subtemper1(&self, x: u32) -> u32 {
-        x ^ ((x >> self.u) & self.d)
+    pub fn state_index(&self) -> usize {
+        self._i
+    }
+
+    pub fn internal_state(&mut self) -> &mut [u32] {
+        self._state.as_mut()
+    }
+    
+    pub fn state_length(&self) -> usize {
+        return self.n as usize
+    }
+    
+    pub fn a(&self) -> u32 {
+        self.a
+    }
+
+    pub fn b(&self) -> u32 {
+        self.b
+    }
+
+    pub fn c(&self) -> u32 {
+        self.c
+    }
+
+    pub fn d(&self) -> u32 {
+        self.d
+    }
+
+    pub fn u(&self) -> u32 {
+        self.u
+    }
+
+    pub fn s(&self) -> u32 {
+        self.s
+    }
+
+    pub fn t(&self) -> u32 {
+        self.t
+    }
+
+    pub fn l(&self) -> u32 {
+        self.l
     }
 
     #[inline]
-    fn _inv_subtemper1(&self, x: u32) -> u32 {
-        let mut x = x;
-        for _ in 0..3 { x = x ^ ((x >> self.u) & self.d); }  // can we be smarter with this?
-        x
+    fn _subtemper1(&self, x: u32) -> u32 {
+        x ^ ((x >> self.u) & self.d)
     }
 
     #[inline]
@@ -162,19 +138,7 @@ impl MT19937 {
     }
 
     #[inline]
-    fn _inv_subtemper2(&self, x: u32) -> u32 {
-        let mut x = x;
-        for _ in 0..7 { x = x ^ ((x << self.s) & self.b); }  // can we be smarter with this?
-        x
-    }
-
-    #[inline]
     fn _subtemper3(&self, x: u32) -> u32 {
-        x ^ ((x << self.t) & self.c)
-    }
-
-    #[inline]
-    fn _inv_subtemper3(&self, x: u32) -> u32 {
         x ^ ((x << self.t) & self.c)
     }
 
@@ -183,50 +147,17 @@ impl MT19937 {
         x ^ (x >> self.l)
     }
 
-    #[inline]
-    fn _inv_subtemper4(&self, x: u32) -> u32 {
-        x ^ (x >> self.l)
-    }
-
-    fn _composite_temper(&self, p: u32) -> u32 {
+    pub fn temper_transform(&self, p: u32) -> u32 {
         let mut x = p;
         x = self._subtemper1(x);
         x = self._subtemper2(x);
         x = self._subtemper3(x);
         self._subtemper4(x)
     }
-
-    fn _composite_untemper(&self, p: u32) -> u32 {
-        let mut x = p;
-        x = self._inv_subtemper4(x);
-        x = self._inv_subtemper3(x);
-        x = self._inv_subtemper2(x);
-        self._inv_subtemper1(x)
-    }
-
-    fn _temper_transform(&self, p: u32) -> u32 {
-        let mut x = p;
-        x = x ^ ((x >> self.u) & self.d);  // u = 11 (!)
-        x = x ^ ((x << self.s) & self.b);  // s = 7 (!!)
-        x = x ^ ((x << self.t) & self.c);  // t = 15 (!)
-        x = x ^ (x >> self.l);  // l = 18
-        x
-    }
     
     fn temper(&mut self) -> u32 {
         self._i += 1;
-        self._temper_transform(self._state[self._i-1])
-    }
-
-    fn _next(&mut self) -> u32 {
-        if self._i as u32 == self.n {
-            self.twist();
-        }
-        self.temper()
-    }
-
-    fn untemper(&self, mt_output: u32) -> u32 {
-        self._composite_untemper(mt_output)
+        self.temper_transform(self._state[self._i-1])  // kept in-bounds as twist() is always called in time
     }
 }
 
@@ -234,16 +165,11 @@ impl MT19937 {
 impl Iterator for MT19937 {
     type Item = u32;
     fn next(&mut self) -> Option<u32> {
-        Some(self._next())
+        if self._i as u32 == self.n {
+            self.twist();
+        }
+        Some(self.temper())
     }
-}
-
-#[derive(PartialEq, Debug)]
-pub enum TempersError {
-    InputLengthError(usize),
-    IncompleteIterator,
-    UnmatcheableIterator,
-    UnknownError
 }
 
 
@@ -253,6 +179,7 @@ mod tests {
     use std::{
         fs::File,
         io::{BufRead, BufReader, Result},
+        iter::zip,
     };
      
     fn read_u32_arr_from_txt(filename: &str, n: u32) -> Result<Vec<u32>> {
@@ -274,140 +201,22 @@ mod tests {
     }
 
     #[test]
-    fn test_initial_state() {
+    fn blank_state() {
         let twister = MT19937::from_seed(5489);
         let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_init_state.txt", 624).unwrap();
         for (my_state, ouyang_state) in zip(twister._state.iter(), ouyang_file.iter()) {
             assert_eq!(my_state, ouyang_state);
         }
     }
-
-    #[test]
-    fn test_state_temper() {  // actually this test is mostly useless, the state only mutates on twist()
-        let mut twister = MT19937::from_seed(5489);
-        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_state_check.txt", 624).unwrap();
-        twister._next();  // increment the state by one, are they still equal?
-        for (my_state, ouyang_state) in zip(twister._state.iter(), ouyang_file.iter()) {
-            assert_eq!(my_state, ouyang_state);
-        }
-    }
     
     #[test]
-    fn test_values() {
+    fn output_values() {
         let mut twister = MT19937::from_seed(5489);
-        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_100_outputs.txt", 1000).unwrap();
+        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_1000_outputs.txt", 1000).unwrap();
         for (i, ouyang_num) in enumerate(ouyang_file.iter()) {
-            let my_num = twister._next();
+            let my_num = twister.next().unwrap();
             assert_eq!(my_num, *ouyang_num,
                 "\n(failed on the {}th number)", i);
         }
     }
-
-    #[test]
-    fn mt_as_iter() {
-        let twister = MT19937::default();  // we don't twist, no need for mutability
-        let ouyang_file = read_u32_arr_from_txt("test-txt/ouyang_mt_100_outputs.txt", 100).unwrap();
-        for (mt_iterated, ouyang_num) in zip(twister, ouyang_file.iter()) {
-            assert_eq!(mt_iterated, *ouyang_num);
-        }
-        
-    }
-
-    #[test]
-    fn untemper_basic_state() {
-        let mut twister = MT19937::from_seed(123456789);
-        let internal_state = twister._state.clone();
-        for (i, e) in enumerate(internal_state) {
-            let curr = twister._next();
-            assert_eq!(e, twister.untemper(curr), "\nfailed on the {}th value;\ntwister state dump:\n{:?}",
-            i, internal_state);
-        }
-    }
-
-    #[test]
-    fn temper_composite() {
-        let twister = MT19937::from_seed(123456789);
-        assert_eq!(twister._temper_transform(123456789), twister._composite_temper(123456789));
-    }
-
-    #[test]
-    fn inv_subtemper4_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper4(twister._subtemper4(123456789)));
-    }
-
-    #[test]
-    fn inv_subtemper3_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper3(twister._subtemper3(123456789)));
-        assert_eq!(987654321, twister._inv_subtemper3(twister._subtemper3(987654321)));
-        assert_eq!(u32::MAX, twister._inv_subtemper3(twister._subtemper3(u32::MAX)));
-        assert_eq!(0, twister._inv_subtemper3(twister._subtemper3(0)));
-    }
-
-    #[test]
-    fn inv_subtemper2_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper2(twister._subtemper2(123456789)));
-        assert_eq!(987654321, twister._inv_subtemper2(twister._subtemper2(987654321)));
-        assert_eq!(u32::MAX, twister._inv_subtemper2(twister._subtemper2(u32::MAX)));
-        assert_eq!(0, twister._inv_subtemper2(twister._subtemper2(0)));
-    }
-
-    #[test]
-    fn inv_subtemper1_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper1(twister._subtemper1(123456789)));
-        assert_eq!(987654321, twister._inv_subtemper1(twister._subtemper1(987654321)));
-        assert_eq!(u32::MAX, twister._inv_subtemper1(twister._subtemper1(u32::MAX)));
-        assert_eq!(0, twister._inv_subtemper1(twister._subtemper1(0)));
-    }
-
-    #[test]
-    fn composite_untemper_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._composite_untemper(twister._composite_temper(123456789)));
-        assert_eq!(987654321, twister._composite_untemper(twister._composite_temper(987654321)));
-        assert_eq!(u32::MAX, twister._composite_untemper(twister._composite_temper(u32::MAX)));
-        assert_eq!(0, twister._composite_untemper(twister._composite_temper(0)));
-    }
-    
-    #[test]
-    fn test_from_complete_state() {
-        let mut twister = MT19937::default();
-        let twister_clone = MT19937::default();
-
-        let first_twist_output: Vec<u32> = (0..624).map(|_| twister._next()).collect();
-        
-        let twister_from_output = MT19937::_from_complete_output(&first_twist_output).unwrap();
-        assert_eq!(twister_from_output, twister_clone);
-        assert_eq!(twister_from_output._i, twister_clone._i);
-    }
-
-    #[test]
-    fn test_from_unknown_state() {
-        let mut target_twister = MT19937::from_seed(987654321);
-        for _ in 0..1000 {
-            target_twister.next();  // get us to a random point between twists
-        }
-        
-        let mut matched_twister = MT19937::from_iter(&mut target_twister).unwrap();
-
-        for _ in 0..1000 {
-            assert_eq!(target_twister.next(), matched_twister.next());
-        }
-    }
-
-    // #[test]
-    // fn dump_subtemper1() {
-    //     let twister = MT19937::default();
-    //     let mut u: u32 = 123456789;
-    //     let mut trail: Vec<u32> = Vec::new();
-    //     trail.push(u.clone());
-    //     for _ in 0..20 {
-    //         trail.push(twister._subtemper1(u.clone()));
-    //         u = twister._subtemper1(u);
-    //     }
-    //     panic!("Trail: {:?}", trail);
-    // }
 }

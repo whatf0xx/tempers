@@ -7,11 +7,12 @@ use std::{
     collections::VecDeque
 };
 
+#[allow(dead_code)]
 impl mt19937::MT19937 {
     fn _from_complete_output(output: &[u32]) -> Result<MT19937, TempersError> {
-        let mut _self = MT19937::_init();
+        let mut _self = MT19937::blank();
         let _len = output.len();
-        if _len != _self.n as usize { 
+        if _len != _self.state_length() as usize { 
             return Err(TempersError::InputLengthError(_len));
         }
 
@@ -19,7 +20,7 @@ impl mt19937::MT19937 {
             .map(|&u| _self.untemper(u))
             .collect();
 
-        for (twister_state, &value) in zip(_self._state.iter_mut(), untempered_output.iter()) {
+        for (twister_state, &value) in zip(_self.internal_state().iter_mut(), untempered_output.iter()) {
             *twister_state = value;
         }
         
@@ -68,40 +69,37 @@ impl mt19937::MT19937 {
             Ok(false)
         }
     }
+    
     #[inline]
     fn _inv_subtemper1(&self, x: u32) -> u32 {
         let mut x = x;
-        for _ in 0..3 { x = x ^ ((x >> self.u) & self.d); }  // can we be smarter with this?
+        for _ in 0..3 { x = x ^ ((x >> self.u()) & self.d()); }  // can we be smarter with this?
         x
     }
 
     #[inline]
     fn _inv_subtemper2(&self, x: u32) -> u32 {
         let mut x = x;
-        for _ in 0..7 { x = x ^ ((x << self.s) & self.b); }  // can we be smarter with this?
+        for _ in 0..7 { x = x ^ ((x << self.s()) & self.b()); }  // can we be smarter with this?
         x
     }
 
     #[inline]
     fn _inv_subtemper3(&self, x: u32) -> u32 {
-        x ^ ((x << self.t) & self.c)
+        x ^ ((x << self.t()) & self.c())
     }
 
     #[inline]
     fn _inv_subtemper4(&self, x: u32) -> u32 {
-        x ^ (x >> self.l)
+        x ^ (x >> self.l())
     }
 
-    fn _composite_untemper(&self, p: u32) -> u32 {
+    fn untemper(&self, p: u32) -> u32 {
         let mut x = p;
         x = self._inv_subtemper4(x);
         x = self._inv_subtemper3(x);
         x = self._inv_subtemper2(x);
         self._inv_subtemper1(x)
-    }
-
-    fn untemper(&self, mt_output: u32) -> u32 {
-        self._composite_untemper(mt_output)
     }
 }
 
@@ -119,72 +117,39 @@ mod tests {
     use itertools::enumerate;
 
     #[test]
+    fn untemper_values() {
+        let twister = MT19937::default();
+        assert_eq!(123456789, twister.untemper(twister.temper_transform(123456789)));
+        assert_eq!(987654321, twister.untemper(twister.temper_transform(987654321)));
+        assert_eq!(u32::MAX, twister.untemper(twister.temper_transform(u32::MAX)));
+        assert_eq!(0, twister.untemper(twister.temper_transform(0)));
+    }
+    
+    #[test]
     fn untemper_basic_state() {
         let mut twister = MT19937::from_seed(123456789);
-        let internal_state = twister._state.clone();
-        for (i, e) in enumerate(internal_state) {
+        let internal_state = twister.internal_state().to_owned();
+        for (i, e) in enumerate(&internal_state) {
             let curr = twister.next().unwrap();
-            assert_eq!(e, twister.untemper(curr), "\nfailed on the {}th value;\ntwister state dump:\n{:?}",
+            assert_eq!(*e, twister.untemper(curr), "\nfailed on the {}th value;\ntwister state dump:\n{:?}",
             i, internal_state);
         }
     }
 
     #[test]
-    fn inv_subtemper4_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper4(twister._subtemper4(123456789)));
-    }
-
-    #[test]
-    fn inv_subtemper3_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper3(twister._subtemper3(123456789)));
-        assert_eq!(987654321, twister._inv_subtemper3(twister._subtemper3(987654321)));
-        assert_eq!(u32::MAX, twister._inv_subtemper3(twister._subtemper3(u32::MAX)));
-        assert_eq!(0, twister._inv_subtemper3(twister._subtemper3(0)));
-    }
-
-    #[test]
-    fn inv_subtemper2_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper2(twister._subtemper2(123456789)));
-        assert_eq!(987654321, twister._inv_subtemper2(twister._subtemper2(987654321)));
-        assert_eq!(u32::MAX, twister._inv_subtemper2(twister._subtemper2(u32::MAX)));
-        assert_eq!(0, twister._inv_subtemper2(twister._subtemper2(0)));
-    }
-
-    #[test]
-    fn inv_subtemper1_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._inv_subtemper1(twister._subtemper1(123456789)));
-        assert_eq!(987654321, twister._inv_subtemper1(twister._subtemper1(987654321)));
-        assert_eq!(u32::MAX, twister._inv_subtemper1(twister._subtemper1(u32::MAX)));
-        assert_eq!(0, twister._inv_subtemper1(twister._subtemper1(0)));
-    }
-
-    #[test]
-    fn composite_untemper_check() {
-        let twister = MT19937::default();
-        assert_eq!(123456789, twister._composite_untemper(twister._composite_temper(123456789)));
-        assert_eq!(987654321, twister._composite_untemper(twister._composite_temper(987654321)));
-        assert_eq!(u32::MAX, twister._composite_untemper(twister._composite_temper(u32::MAX)));
-        assert_eq!(0, twister._composite_untemper(twister._composite_temper(0)));
-    }
-    
-    #[test]
-    fn test_from_complete_state() {
+    fn reassemble_from_complete_state() {
         let mut twister = MT19937::default();
         let twister_clone = MT19937::default();
 
-        let first_twist_output: Vec<u32> = (0..624).map(|_| twister._next()).collect();
+        let first_twist_output: Vec<u32> = (0..624).map(|_| twister.next().unwrap()).collect();
         
         let twister_from_output = MT19937::_from_complete_output(&first_twist_output).unwrap();
         assert_eq!(twister_from_output, twister_clone);
-        assert_eq!(twister_from_output._i, twister_clone._i);
+        assert_eq!(twister_from_output.state_index(), twister_clone.state_index());
     }
 
     #[test]
-    fn test_from_unknown_state() {
+    fn reassemble_from_unknown_state() {
         let mut target_twister = MT19937::from_seed(987654321);
         for _ in 0..1000 {
             target_twister.next();  // get us to a random point between twists
