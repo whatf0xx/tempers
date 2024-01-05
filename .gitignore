@@ -4,3 +4,4 @@ MT19937
 /mersenne-twister
 .env
 .vscode
+__pycache__
