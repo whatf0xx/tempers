@@ -4,6 +4,7 @@ use std::num::Wrapping;
 
 #[allow(dead_code)]
 #[derive(PartialEq, Debug)]
+#[repr(C)]
 pub struct MT19937 {
     w: u32,  // 32 for 32-bit integers, don't change this because all the params depend on it
     n: u32,

@@ -2,6 +2,7 @@
 
 mod mt19937;
 use mt19937::MT19937;
+mod mt19937_ffi;
 use std::{
     iter::zip,
     collections::VecDeque
