@@ -43,7 +43,7 @@ impl MT19937 {
             c: 0xefc60000,
             l: 18,
             _state: [0;624],
-            _i: 0
+            _i: 624
         }
     }
 
@@ -58,7 +58,7 @@ impl MT19937 {
             *x = temp_overflow.0;  // this is how we access the wrapped unit, apparently
             prev = Wrapping(*x);
         }
-        _self.twist();
+        // _self.twist();
         _self
     }
     
